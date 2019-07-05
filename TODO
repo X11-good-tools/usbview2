@@ -1,0 +1,13 @@
+
+@TODO - Usbview2
+----------------
+
+- usbtree.c: Create an unique function for PopulateDevConfig, PopulateDevInterfaces,
+  PopuplateDevPoints.
+- Clean the source code (callbacks.c)
+- The menu bar is incomplete (only the exit and about options are working)
+
+
+
+Luis Galdos, 2007
+<felipito@gmx.net>

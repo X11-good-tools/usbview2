@@ -1,0 +1,13 @@
+version 0.1a
+	- First alpha release of Usbview2 in sourceforge.net
+	- 
+    
+version 0.2a
+	- Now Usbview2 accepts command-line options. Try `usbview2 --help' for infos.
+
+version 0.3a
+	- With activated refresh force open the error dialog only one time. If the
+	  file changes, than open the dialog once again.
+	- If no read access to the devices file, then clear the tree and the notebook
+	  too (and change the status bar)
+	- 
