@@ -1,31 +1,26 @@
 /*************************************************************************
-** callbacks.c for USBView2
-** Copyright (c) 2007 Luis Galdos <felipito@gmx.net>
-**
-**  This program is free software; you can redistribute it and/or modify
-**  it under the terms of the GNU General Public License as published by
-**  the Free Software Foundation; either version 2 of the License, or
-**  (at your option) any later version.
-**
-**  This program is distributed in the hope that it will be useful,
-**  but WITHOUT ANY WARRANTY; without even the implied warranty of
-**  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-**  GNU General Public License for more details.
-**
-**  You should have received a copy of the GNU General Public License
-**  along with this program; if not, write to the Free Software
-**  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-**
-** (See the included file COPYING)
-*************************************************************************/
-
+ * callbacks.c for USBView2
+ * Copyright (c) 2007-2010 Luis Galdos <felipito@gmx.net>
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, write to the Free Software
+ *  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ *
+ * (See the included file COPYING)
+ *************************************************************************/
 
 /* The pixel buffer object was created with: */
 /* gdk-pixbuf-csource --raw --name=logo logo.xpm  > ../src/logo.h */
-
-
-
-
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
@@ -34,6 +29,7 @@
 #include <gtk/gtk.h>
 #include <string.h>
 #include <stdlib.h>
+#include <libgen.h> /* Required for basename() */
 
 #include "callbacks.h"
 #include "interface.h"
@@ -42,11 +38,26 @@
 
 #include "usbparse.h"
 #include "usbtree.h"
+#include "lsusb.h"
 
 #define DEFAULT_REFRESH			2000
 #define DEFAULT_MAX_REFRESH_SEC		100
 #define DEFAULT_DEVICES_FILE		"/proc/bus/usb/devices"
 
+/* Disable the update operation of the USB tree */
+#if 0
+#define ENABLE_UPDATE_DBG
+#endif
+
+/* Enable the debug messages */
+#if 0
+#define ENABLE_DBG
+#endif
+#if defined(ENABLE_DBG)
+#define pr_dbg(fmt, args...)		do { g_print("[DBG] calls: " fmt, ## args); } while(0)
+#else
+#define pr_dbg(fmt, args...)		do { } while (0)
+#endif /* ENABLE_DBG */
 
 enum notebook_enum {
   COMPLETE,
@@ -55,11 +66,12 @@ enum notebook_enum {
   ENDPOINTS,
 };
 
-
 struct internal_t {
   gchar *devfile;
+  gchar *devxml;	/* XML  configuration file */
   gint refresh;		/* In milliseconds */
   gboolean force;
+  gboolean force_one;   /* Force the refresh only one time */
 
   /* Internal data */
   GtkWidget *main;
@@ -72,9 +84,7 @@ struct internal_t {
   guint refresh_id;
 };
 
-
 static struct internal_t *in;
-
 
 enum {
   COL_DEVICE_NAME = 0,
@@ -115,9 +125,8 @@ enum {
   COL_EP_NR
 };
 
-
 static void configure_treeUSB(GtkWidget *main);
-static guint update_usb_tree(struct internal_t *data);
+static gboolean update_usb_tree(gpointer data);
 
 static void configure_listConfigurations(GtkWidget *main);
 static void configure_listInterfaces(GtkWidget *main);
@@ -128,38 +137,64 @@ static void notebook_update(void);
 static void notebook_update_tab(enum notebook_enum tab, gint deviceId);
 static void notebook_clear_tab(enum notebook_enum tab);
 
+static void properties_usbfs_active(GtkWidget *window, gint active);
 
 /****************************************************************\
 
 Interface to the main function (read options)
 
 \****************************************************************/
-
-
 int read_input_options(int argc, char *argv[])
 {
   GError *error = NULL;
   GOptionContext* context;
+  int ret;
 
   in = g_malloc0(sizeof(struct internal_t));
 
   GOptionEntry entries[] = {
-    { "devices-file", 'd', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_STRING, &in->devfile,
-      "Path to the devices file", NULL },
-    { "refresh-time", 't', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_INT, &in->refresh,
-      "Refresh time in seconds", NULL },
-    { "refresh-force", 'f', G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_NONE, &in->force,
-      "Force refresh every cycle", NULL },
+
+#if defined(USBVIEW2_WITH_USBFS)
+    { "usbfs-file", 'u', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_STRING, &in->devfile,
+      "Path to the Usbfs devices file", NULL },
+#endif /* USBVIEW2_WITH_USBFS */
+    
+    { "refresh-time", 'r', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_INT, &in->refresh,
+      "Tree refresh time in seconds", NULL },
+    { "force-refresh", 'f', G_OPTION_FLAG_NO_ARG, G_OPTION_ARG_NONE, &in->force,
+      "Force tree refresh every cycle (don't check for changes)", NULL },
+    { "xml-file", 'x', G_OPTION_FLAG_IN_MAIN, G_OPTION_ARG_STRING, &in->devxml,
+      "XML file with the VIDs and PIDs", NULL },
     { NULL }
   };
 
   context = g_option_context_new (" - This is USBView2");
   g_option_context_add_main_entries (context, entries, GETTEXT_PACKAGE);
   g_option_context_add_group (context, gtk_get_option_group (TRUE));
-  g_option_context_parse (context, &argc, &argv, &error);
+
+  if (!g_option_context_parse (context, &argc, &argv, &error)) {
+    char *appname;
+
+    appname = basename(argv[0]);
+    
+    g_print("Error parsing command line options, %s\nTry `%s --help` for more infos.\n",
+	    error->message, appname);
+    exit(EXIT_FAILURE);
+  }
+
+  /* Set the default value if no XML file passed */
+  if (!in->devxml) {
+    pr_dbg("Using default XML file '"USBXML_DIR"/usb.xml'\n");
+    in->devxml = g_strdup(USBXML_DIR"/usb.xml");
+  }
   
-  if(!in->devfile) in->devfile = g_strdup(DEFAULT_DEVICES_FILE);
-  if(in->refresh>0 && in->refresh<=DEFAULT_MAX_REFRESH_SEC)    
+  ret = lsusb_init_ids(in->devxml);
+  if (ret) {
+    g_print("Unexpected failure opening the XML file '%s'\n", in->devxml);
+    exit(ret);
+  }
+  
+  if (in->refresh>0 && in->refresh<=DEFAULT_MAX_REFRESH_SEC)    
     in->refresh = 1000*in->refresh;
   else {
     if(in->refresh<0)
@@ -174,13 +209,11 @@ int read_input_options(int argc, char *argv[])
   return EXIT_SUCCESS;
 }
 
-
 /****************************************************************\
 
 Interface to Usbview1.0
 
 \****************************************************************/
-
 void add_list_configurations(DeviceConfig *config)
 {
   gchar	*attr;
@@ -201,7 +234,6 @@ void add_list_configurations(DeviceConfig *config)
                      -1);
   g_free(attr);
 }
-
 
 void add_list_interfaces(DeviceConfig *config, DeviceInterface *iface)
 {
@@ -224,7 +256,6 @@ void add_list_interfaces(DeviceConfig *config, DeviceInterface *iface)
 		     COL_INTER_EPS, iface->numEndpoints,
                      -1);
 }
-
 
 void add_list_endpoints(DeviceConfig *config, DeviceInterface *iface,
 			DeviceEndpoint *ep)
@@ -252,8 +283,6 @@ void add_list_endpoints(DeviceConfig *config, DeviceInterface *iface,
   g_free(addr);
 }
 
-
-
 void update_device_infos(const gchar *data)
 {
   GtkWidget *label;
@@ -263,7 +292,6 @@ void update_device_infos(const gchar *data)
   label = lookup_widget(in->main, "labMainDevice");
   gtk_label_set_text(GTK_LABEL(label), data);
 }
-
 
 void clear_devices_tree(void)
 {
@@ -282,7 +310,6 @@ void clear_devices_tree(void)
   notebook_update();
 }
 
-
 void update_operation_statusbar(const gchar *text)
 {
   GtkWidget *bar;
@@ -293,23 +320,28 @@ void update_operation_statusbar(const gchar *text)
   gtk_statusbar_push(GTK_STATUSBAR(bar), id, text);  
 }
 
-
-void update_devfile_statusbar(const gchar *text)
+/* If the passed path pointer is NULL then clear the status bar */
+void update_devfile_statusbar(const gchar *path)
 {
   GtkWidget *bar;
   guint id;
-  gchar *data;
   const gchar *pref = "Devices file: ";
-  
-  data = g_malloc(strlen(text) + strlen(pref) + 1);
-  sprintf(data, "%s%s", pref, text);
-  
+  static guint last_msgid; 
+
   bar = lookup_widget(in->main, "statbarMainFile");
   id = gtk_statusbar_get_context_id (GTK_STATUSBAR(bar), "Notification");
-  gtk_statusbar_push(GTK_STATUSBAR(bar), id, data);
-  g_free(data);
+  
+  if (path) {
+    gchar *data;
+    
+    data = g_malloc(strlen(path) + strlen(pref) + 1);
+    sprintf(data, "%s%s", pref, path);
+    last_msgid = gtk_statusbar_push(GTK_STATUSBAR(bar), id, data);
+    g_free(data);
+  } else if (last_msgid) {
+      gtk_statusbar_remove(GTK_STATUSBAR(bar), id, last_msgid);
+  }
 }
-
 
 int add_tree_device(Device *parent, Device *device)
 {
@@ -324,10 +356,14 @@ int add_tree_device(Device *parent, Device *device)
   device->pthis = &device->this;
 
   /* change the color of this leaf if there are no drivers attached to it */
-  if(!device->driverAttached) fore = "red";
-  else fore = "black";
+  fore = (!device->driverAttached) ? "red" : "black";
   
   id = ((device->deviceNumber<<8) | (device->busNumber));
+  if (!id) {
+    /* @XXX: Need an error handler at this point */
+    pr_dbg("Invalid ID number for device '%s'\n", device->name);
+  }
+  
   gtk_tree_store_set(GTK_TREE_STORE(model), &device->this,
                      COL_DEVICE_NAME, device->name,
 		     COL_DEVICE_ID, id,
@@ -335,7 +371,6 @@ int add_tree_device(Device *parent, Device *device)
                      -1);
   return EXIT_SUCCESS;
 }
-
 
 /* @ToDo: Implement msgtype for error/warning/info/etc. */
 void display_message(const gchar *title, const gchar *mes, gboolean centered,
@@ -352,14 +387,11 @@ void display_message(const gchar *title, const gchar *mes, gboolean centered,
   gtk_widget_show(in->message);
 }
 
-
-
 /****************************************************************\
 
 Internal functions
 
 \****************************************************************/
-
 static gint get_usb_tree_selected_id(GtkWidget *main)
 {
   GtkTreeSelection *selection;
@@ -373,13 +405,16 @@ static gint get_usb_tree_selected_id(GtkWidget *main)
   model = gtk_tree_view_get_model(GTK_TREE_VIEW(tree));
   selection = gtk_tree_view_get_selection (GTK_TREE_VIEW(tree));
 
-  if(gtk_tree_selection_count_selected_rows(selection)) {
-    if (gtk_tree_selection_get_selected (selection, &model, &iter)) {
+  if (gtk_tree_selection_count_selected_rows(selection)) {
+    if (gtk_tree_selection_get_selected(selection, &model, &iter)) {
       gtk_tree_model_get (model, &iter,
 			  COL_DEVICE_ID, &id,
 			  -1);
-    }
-  }
+    } else
+      pr_dbg("Failed get selection of the Gtk tree.\n");
+  } else
+    pr_dbg("No row selected in the tree.\n");
+  
   return id;
 }
 
@@ -397,11 +432,12 @@ static void free_resources(void)
 {
   if(!in) return;
 
-  if(in->about) gtk_widget_destroy(in->about);
-  if(in->proper) gtk_widget_destroy(in->proper);
-  if(in->chooser) gtk_widget_destroy(in->chooser);
-  if(in->main) gtk_widget_destroy(in->main);
-  if(in->devfile) g_free(in->devfile);
+  if (in->about) gtk_widget_destroy(in->about);
+  if (in->proper) gtk_widget_destroy(in->proper);
+  if (in->chooser) gtk_widget_destroy(in->chooser);
+  if (in->main) gtk_widget_destroy(in->main);
+  if (in->devfile) g_free(in->devfile);
+  if (in->devxml) g_free(in->devxml);
   
   if(in->refresh_id) {
     g_source_remove(in->refresh_id);
@@ -411,22 +447,17 @@ static void free_resources(void)
   g_free(in);
 }
 
-
-
 /****************************************************************\
 
 Menu functions
 
 \****************************************************************/
-
-
 void
 on_open1_activate                      (GtkMenuItem     *menuitem,
                                         gpointer         user_data)
 {
 
 }
-
 
 void
 on_save1_activate                      (GtkMenuItem     *menuitem,
@@ -435,14 +466,12 @@ on_save1_activate                      (GtkMenuItem     *menuitem,
 
 }
 
-
 void
 on_save_as1_activate                   (GtkMenuItem     *menuitem,
                                         gpointer         user_data)
 {
 
 }
-
 
 void
 on_quit1_activate                      (GtkMenuItem     *menuitem,
@@ -452,14 +481,12 @@ on_quit1_activate                      (GtkMenuItem     *menuitem,
   gtk_exit(0);
 }
 
-
 void
 on_about1_activate                     (GtkMenuItem     *menuitem,
                                         gpointer         user_data)
 {
   on_btnMainAbout_clicked(NULL, NULL);
 }
-
 
 void
 on_btnMainProperties_clicked           (GtkToolButton   *toolbutton,
@@ -470,6 +497,7 @@ on_btnMainProperties_clicked           (GtkToolButton   *toolbutton,
   GtkWidget *entry, *spin;
   GtkWidget *ckbtn;
   gdouble val;
+  gint usbfs_active;
   
   if(!in->proper) {
     in->proper = create_Properties();    
@@ -496,10 +524,28 @@ on_btnMainProperties_clicked           (GtkToolButton   *toolbutton,
   ckbtn = lookup_widget(in->proper, "ckbtnPropertiesForce");  
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ckbtn), in->force);
 
+  /*
+   * @XXX: We don't need to deactivate the usbfs widgets every time cause the support
+   * is not available
+   */
+#if !defined(USBVIEW2_WITH_USBFS)
+  usbfs_active = 0;
+  
+  {
+    GtkWidget *usbtn;
+    
+    usbtn = lookup_widget(in->proper, "ckbtnPropertiesUsbfs");
+    gtk_widget_set_sensitive(GTK_WIDGET(usbtn), 0);
+  }
+  
+#else
+  usbfs_active = (in->devfile) ? 1 : 0;
+#endif /* USBVIEW2_WITH_USBFS */
+  
+  properties_usbfs_active(in->proper, usbfs_active);
+
   gtk_window_present(GTK_WINDOW(in->proper));
 }
-
-
 
 void
 on_btnMainClose_clicked                (GtkToolButton   *toolbutton,
@@ -508,7 +554,6 @@ on_btnMainClose_clicked                (GtkToolButton   *toolbutton,
   free_resources();  
   gtk_exit(0);
 }
-
 
 void
 on_btnMainAbout_clicked                (GtkToolButton   *toolbutton,
@@ -536,8 +581,6 @@ on_btnMainAbout_clicked                (GtkToolButton   *toolbutton,
   gtk_window_present(GTK_WINDOW(in->about));
 }
 
-
-
 gboolean
 on_Main_delete_event                   (GtkWidget       *widget,
                                         GdkEvent        *event,
@@ -547,8 +590,6 @@ on_Main_delete_event                   (GtkWidget       *widget,
   gtk_exit(0);
   return TRUE; /* We destroy the main widget under free_resources() -> return TRUE */
 }
-
-
 
 void
 on_Main_show                           (GtkWidget       *widget,
@@ -568,8 +609,6 @@ on_Main_show                           (GtkWidget       *widget,
   configure_listInterfaces(widget);
   configure_listEndpoints(widget);
   
-  update_devfile_statusbar(in->devfile);
-  
   white.red = white.green = white.blue = 65535;
   eventbox = lookup_widget(widget, "eventbox4");
   gtk_widget_modify_bg(GTK_WIDGET(eventbox), GTK_STATE_NORMAL, &white);
@@ -579,25 +618,66 @@ on_Main_show                           (GtkWidget       *widget,
   in->force = TRUE;
   update_usb_tree(in);
   in->force = force;
-  in->refresh_id = g_timeout_add(in->refresh, (GSourceFunc)update_usb_tree,
-				 in);
+  in->refresh_id = g_timeout_add(in->refresh, update_usb_tree, in);
 }
 
-
-static guint update_usb_tree(struct internal_t *data)
+/*
+ * Return FALSE for stopping the repeated call of this function
+ */
+static gboolean update_usb_tree(gpointer _data)
 {
   GtkWidget *tree;
-
-  if(!data) return FALSE;
+  struct internal_t *data;
+  int ret;
+  const gchar *fl;
+  gboolean force;
   
-  /* Check if we need to expa*/
-  if(LoadUSBTree(data->force, data->devfile)) {
+  if(!_data)
+    return FALSE;
+
+#if defined(ENABLE_UPDATE_DBG)
+ {
+   static int debug_update = 0;
+   
+   if (debug_update) {
+     g_print("Stopping repeated call of %s\n", __func__);
+     return FALSE;
+   }
+   debug_update++;
+ }
+#endif /* ENABLE_UPDATE_DBG */
+ 
+  data = (struct internal_t *)_data;
+  force = data->force || data->force_one;
+  
+  /* Check if we need to expand the tree due a modification */
+#if defined(USBVIEW2_WITH_USBFS)
+  if (data->devfile) {
+    fl = data->devfile;
+    ret = LoadUSBTree(force, data->devfile);
+  } else {
+    fl = data->devxml;
+    ret = lsusb_load_tree(force);
+  }
+#else
+  fl = data->devxml;
+  ret = lsusb_load_tree(force);
+#endif /* USBVIEW2_WITH_USBFS */
+
+  update_devfile_statusbar(fl);
+  
+  if (ret > 0) {
     tree = lookup_widget(data->main, "treeUSB");
     gtk_tree_view_expand_all(GTK_TREE_VIEW(tree));
+    update_operation_statusbar("Update succeeded");
+  } else if (ret < 0) {
+    /* @XXX: Add some error handler at this point or return FALSE? */
+    update_operation_statusbar("Update failed");
   }
+
+  data->force_one = 0;
   return TRUE;
 }
-
 
 static void add_list_column(GtkTreeView *tree, gchar *name, gint colnr)
 {
@@ -610,7 +690,6 @@ static void add_list_column(GtkTreeView *tree, gchar *name, gint colnr)
   gtk_tree_view_column_set_resizable (col1, TRUE);
   gtk_tree_view_append_column(GTK_TREE_VIEW(tree), col1);
 }
-
 
 static void configure_listInterfaces(GtkWidget *main)
 {
@@ -666,8 +745,6 @@ static void configure_listConfigurations(GtkWidget *main)
                               GTK_SELECTION_SINGLE);
 }
 
-
-
 static void configure_listEndpoints(GtkWidget *main)
 {
   GtkWidget *tree;
@@ -699,9 +776,6 @@ static void configure_listEndpoints(GtkWidget *main)
   gtk_tree_selection_set_mode(gtk_tree_view_get_selection(GTK_TREE_VIEW(tree)),
                               GTK_SELECTION_SINGLE);
 }
-
-
-
 
 static void configure_treeUSB(GtkWidget *main)
 {
@@ -746,8 +820,6 @@ static void configure_treeUSB(GtkWidget *main)
                               GTK_SELECTION_SINGLE);
 }
 
-
-
 void
 on_treeUSB_cursor_changed              (GtkTreeView     *treeview,
                                         gpointer         user_data)
@@ -756,21 +828,19 @@ on_treeUSB_cursor_changed              (GtkTreeView     *treeview,
   gint id;
   
   top = gtk_widget_get_toplevel(GTK_WIDGET(treeview));
-  if((id = get_usb_tree_selected_id(top))==0) return;  
+  if ((id = get_usb_tree_selected_id(top))==0) {
+    pr_dbg("Got invalid ID number from the tree.\n");
+    return;
+  }
   
   notebook_update();
 }
-
-
-
 
 /****************************************************************\
 
 File chooser
 
 \****************************************************************/
-
-
 gboolean
 on_Chooser_delete_event                (GtkWidget       *widget,
                                         GdkEvent        *event,
@@ -779,7 +849,6 @@ on_Chooser_delete_event                (GtkWidget       *widget,
   if(in) in->chooser = NULL;
   return FALSE;
 }
-
 
 void
 on_btnChooserCancel_clicked            (GtkButton       *button,
@@ -790,7 +859,6 @@ on_btnChooserCancel_clicked            (GtkButton       *button,
 
   gtk_widget_hide(in->chooser);  
 }
-
 
 void
 on_btnChooserOpen_clicked              (GtkButton       *button,
@@ -808,13 +876,23 @@ on_btnChooserOpen_clicked              (GtkButton       *button,
   gtk_widget_hide(in->chooser);
 }
 
-
-
 /****************************************************************\
 
 Properties dialog
 
 \****************************************************************/
+static void properties_usbfs_active(GtkWidget *window, gint active)
+{
+  GtkWidget *ent, *opbtn, *usbtn;
+  
+  opbtn = lookup_widget(window, "btnPropertiesOpen");
+  ent = lookup_widget(window, "entPropertiesFile");
+  usbtn = lookup_widget(in->proper, "ckbtnPropertiesUsbfs");
+
+  gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(usbtn), active);
+  gtk_widget_set_sensitive(GTK_WIDGET(opbtn), active);
+  gtk_widget_set_sensitive(GTK_WIDGET(ent), active);
+}
 
 void
 on_btnPropertiesOpen_clicked           (GtkButton       *button,
@@ -826,6 +904,21 @@ on_btnPropertiesOpen_clicked           (GtkButton       *button,
   gtk_window_present(GTK_WINDOW(in->chooser));
 }
 
+void
+on_ckbtnPropertiesUsbfs_toggled        (GtkToggleButton *togglebutton,
+                                        gpointer         user_data)
+{
+  GtkWidget *ckbtn;
+  gint active;
+  GtkWidget *proper;
+
+  proper = gtk_widget_get_toplevel(GTK_WIDGET(togglebutton));
+  ckbtn = lookup_widget(proper, "ckbtnPropertiesUsbfs");
+  active = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ckbtn));
+
+  /* Enable/Disable the widgets for the usbfs */
+  properties_usbfs_active(proper, active);
+}
 
 void
 on_btnPropertiesCancel_clicked         (GtkButton       *button,
@@ -834,6 +927,13 @@ on_btnPropertiesCancel_clicked         (GtkButton       *button,
   gtk_widget_hide(in->proper);
 }
 
+static gint properties_usbfs_enabled(GtkWidget *window)
+{
+  GtkWidget *btn;
+  
+  btn = lookup_widget(window, "ckbtnPropertiesUsbfs");
+  return gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(btn));
+}
 
 void
 on_btnPropertiesOk_clicked             (GtkButton       *button,
@@ -845,23 +945,39 @@ on_btnPropertiesOk_clicked             (GtkButton       *button,
   GtkWidget *ckbtn;
   const gchar *devfile;
   gint newref;
-  
+  GtkWidget *tree;
+  GtkTreeSelection *selection;
+  gint usbfs;
+
   proper = gtk_widget_get_toplevel(GTK_WIDGET(button));
   ent = lookup_widget(proper, "entPropertiesFile");
   spin = lookup_widget(proper, "spinPropertiesTimeout");
   ckbtn = lookup_widget(proper, "ckbtnPropertiesForce");
-
-  in->force = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ckbtn));
   
-  devfile = gtk_entry_get_text(GTK_ENTRY(ent));  
-  if(in->devfile) g_free(in->devfile);
-  in->devfile = g_strdup(devfile);
+  usbfs = properties_usbfs_enabled(proper);
 
-  update_devfile_statusbar(devfile);
+  devfile = gtk_entry_get_text(GTK_ENTRY(ent));
+
+  /* When the Usbfs is enabled and no devices file is defined display an error */
+  if (usbfs && !strlen(devfile)) {
+    display_message("Configuration error",
+		    "Usbfs enabled but no devices file defined.\n", 1, 0);
+    return;
+  }
+  
+  in->force = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(ckbtn));
+
+  /* First free the old devfile */
+  if (in->devfile) {
+    g_free(in->devfile);
+    in->devfile = NULL;
+  }
+
+  /* If usbfs is enabled, then only duplicate the text entry value */
+  if (usbfs)
+    in->devfile = g_strdup(devfile);
 
   /* Ok, unselect the tree if one row is selected */
-  GtkWidget *tree;
-  GtkTreeSelection *selection;
   tree = lookup_widget (in->main, "treeUSB");
   selection = gtk_tree_view_get_selection (GTK_TREE_VIEW(tree));
   if(gtk_tree_selection_count_selected_rows(selection))
@@ -872,15 +988,16 @@ on_btnPropertiesOk_clicked             (GtkButton       *button,
   if(in->refresh!=newref) {
     if(in->refresh_id) g_source_remove(in->refresh_id);
     in->refresh = newref*1000;
-    in->refresh_id = g_timeout_add(in->refresh, (GSourceFunc)update_usb_tree,
-				   in);
+    in->refresh_id = g_timeout_add(in->refresh, (GSourceFunc)update_usb_tree, in);
   }
   
   gtk_widget_hide(in->proper);
+
+  /* Force the update one time */
+  in->force_one = 1;
   update_usb_tree(in);
   notebook_update();
 }
-
 
 gboolean
 on_Properties_delete_event             (GtkWidget       *widget,
@@ -891,15 +1008,11 @@ on_Properties_delete_event             (GtkWidget       *widget,
   return FALSE;
 }
 
-
-
-
 /****************************************************************\
 
 About window
 
 \****************************************************************/
-
 void
 on_btnAboutOk_clicked                  (GtkButton       *button,
                                         gpointer         user_data)
@@ -907,7 +1020,6 @@ on_btnAboutOk_clicked                  (GtkButton       *button,
   if(!in) return;
   gtk_widget_hide(in->about);
 }
-
 
 gboolean
 on_About_delete_event                  (GtkWidget       *widget,
@@ -918,15 +1030,11 @@ on_About_delete_event                  (GtkWidget       *widget,
   return FALSE;
 }
 
-
-
-
 /****************************************************************\
 
 Message window
 
 \****************************************************************/
-
 gboolean
 on_Message_delete_event                (GtkWidget       *widget,
                                         GdkEvent        *event,
@@ -936,7 +1044,6 @@ on_Message_delete_event                (GtkWidget       *widget,
   return FALSE;
 }
 
-
 void
 on_btnMessageOk_clicked                (GtkButton       *button,
                                         gpointer         user_data)
@@ -944,13 +1051,11 @@ on_btnMessageOk_clicked                (GtkButton       *button,
   gtk_widget_hide(in->message);
 }
 
-
 /****************************************************************\
 
 Main notebook
 
 \****************************************************************/
-
 static void notebook_update(void)
 {
   gint id;
@@ -964,10 +1069,11 @@ static void notebook_update(void)
   notebook_update_tab(tab, id);
 }
 
-
+/* Function called for updating the different TABs of the main window */
 static void notebook_update_tab(enum notebook_enum tab, gint deviceId)
 {  
-  if(deviceId==0) return;
+  if (!deviceId)
+    return;
   
   switch(tab) {
   case COMPLETE:

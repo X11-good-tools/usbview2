@@ -141,6 +141,7 @@ typedef struct DeviceBandwidth {
 
 typedef struct Device {
   gchar		*name;
+  gint		busAddress;
   gint		busNumber;
   gint		level;
   gint		parentNumber;

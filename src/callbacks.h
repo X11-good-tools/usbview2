@@ -1,5 +1,8 @@
 #include <gtk/gtk.h>
 
+#include "usbparse.h"
+
+int add_tree_device(Device *parent, Device *device);
 
 void
 on_open1_activate                      (GtkMenuItem     *menuitem,
@@ -102,4 +105,8 @@ on_notebDevice_switch_page             (GtkNotebook     *notebook,
 
 gboolean
 on_treeUSB_unselect_all                (GtkTreeView     *treeview,
+                                        gpointer         user_data);
+
+void
+on_ckbtnPropertiesUsbfs_toggled        (GtkToggleButton *togglebutton,
                                         gpointer         user_data);

@@ -444,7 +444,7 @@ create_About (void)
   gtk_widget_show (hseparator5);
   gtk_box_pack_start (GTK_BOX (vbox4), hseparator5, FALSE, FALSE, 0);
 
-  label7 = gtk_label_new (_("\n<b>Usbview2</b> (v0.3a)\nThis application is based on\nUsbview of Greg Kroah-Hartman\n\n<span weight=\"bold\">GNU General Public License</span>\n\nfelipito@gmx.net\n<span size=\"medium\">(c) 2007 Luis Galdos</span>\n"));
+  label7 = gtk_label_new (_("\n<b>Usbview2</b> (v0.4a)\nThis application is based on\nUsbview of Greg Kroah-Hartman\n\n<span weight=\"bold\">GNU General Public License</span>\n\nfelipito@gmx.net\n<span size=\"medium\">(c) 2007-2010 Luis Galdos</span>\n"));
   gtk_widget_show (label7);
   gtk_box_pack_start (GTK_BOX (vbox4), label7, FALSE, FALSE, 0);
   gtk_label_set_use_markup (GTK_LABEL (label7), TRUE);
@@ -504,6 +504,9 @@ create_Properties (void)
   GtkWidget *label20;
   GtkWidget *ckbtnPropertiesForce;
   GtkWidget *label10;
+  GtkWidget *hbox12;
+  GtkWidget *label21;
+  GtkWidget *ckbtnPropertiesUsbfs;
   GtkWidget *hbox8;
   GtkWidget *entPropertiesFile;
   GtkWidget *btnPropertiesOpen;
@@ -592,6 +595,22 @@ create_Properties (void)
   gtk_label_set_use_markup (GTK_LABEL (label10), TRUE);
   gtk_misc_set_alignment (GTK_MISC (label10), 0, 0.5);
 
+  hbox12 = gtk_hbox_new (FALSE, 0);
+  gtk_widget_show (hbox12);
+  gtk_box_pack_start (GTK_BOX (vbox6), hbox12, TRUE, TRUE, 0);
+
+  label21 = gtk_label_new (_("Enable USB file system (usbfs)"));
+  gtk_widget_show (label21);
+  gtk_box_pack_start (GTK_BOX (hbox12), label21, TRUE, TRUE, 6);
+  gtk_misc_set_alignment (GTK_MISC (label21), 0, 0.5);
+
+  ckbtnPropertiesUsbfs = gtk_check_button_new_with_mnemonic ("");
+  gtk_widget_show (ckbtnPropertiesUsbfs);
+  gtk_box_pack_start (GTK_BOX (hbox12), ckbtnPropertiesUsbfs, FALSE, FALSE, 0);
+  GTK_WIDGET_UNSET_FLAGS (ckbtnPropertiesUsbfs, GTK_CAN_FOCUS);
+  gtk_tooltips_set_tip (tooltips, ckbtnPropertiesUsbfs, _("Use the USB file system devices file instead of Libusb"), NULL);
+  gtk_button_set_focus_on_click (GTK_BUTTON (ckbtnPropertiesUsbfs), FALSE);
+
   hbox8 = gtk_hbox_new (FALSE, 0);
   gtk_widget_show (hbox8);
   gtk_box_pack_start (GTK_BOX (vbox6), hbox8, FALSE, FALSE, 2);
@@ -600,7 +619,6 @@ create_Properties (void)
   gtk_widget_show (entPropertiesFile);
   gtk_box_pack_start (GTK_BOX (hbox8), entPropertiesFile, TRUE, TRUE, 6);
   gtk_tooltips_set_tip (tooltips, entPropertiesFile, _("File with the USB devices"), NULL);
-  gtk_editable_set_editable (GTK_EDITABLE (entPropertiesFile), FALSE);
 
   btnPropertiesOpen = gtk_button_new ();
   gtk_widget_show (btnPropertiesOpen);
@@ -635,6 +653,9 @@ create_Properties (void)
   g_signal_connect ((gpointer) Properties, "delete_event",
                     G_CALLBACK (on_Properties_delete_event),
                     NULL);
+  g_signal_connect ((gpointer) ckbtnPropertiesUsbfs, "toggled",
+                    G_CALLBACK (on_ckbtnPropertiesUsbfs_toggled),
+                    NULL);
   g_signal_connect ((gpointer) btnPropertiesOpen, "clicked",
                     G_CALLBACK (on_btnPropertiesOpen_clicked),
                     NULL);
@@ -661,6 +682,9 @@ create_Properties (void)
   GLADE_HOOKUP_OBJECT (Properties, label20, "label20");
   GLADE_HOOKUP_OBJECT (Properties, ckbtnPropertiesForce, "ckbtnPropertiesForce");
   GLADE_HOOKUP_OBJECT (Properties, label10, "label10");
+  GLADE_HOOKUP_OBJECT (Properties, hbox12, "hbox12");
+  GLADE_HOOKUP_OBJECT (Properties, label21, "label21");
+  GLADE_HOOKUP_OBJECT (Properties, ckbtnPropertiesUsbfs, "ckbtnPropertiesUsbfs");
   GLADE_HOOKUP_OBJECT (Properties, hbox8, "hbox8");
   GLADE_HOOKUP_OBJECT (Properties, entPropertiesFile, "entPropertiesFile");
   GLADE_HOOKUP_OBJECT (Properties, btnPropertiesOpen, "btnPropertiesOpen");

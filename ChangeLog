@@ -1,7 +1,6 @@
 version 0.1a
 	- First alpha release of Usbview2 in sourceforge.net
-	- 
-    
+ 
 version 0.2a
 	- Now Usbview2 accepts command-line options. Try `usbview2 --help' for infos.
 
@@ -10,4 +9,11 @@ version 0.3a
 	  file changes, than open the dialog once again.
 	- If no read access to the devices file, then clear the tree and the notebook
 	  too (and change the status bar)
-	- 
+
+version 0.4a
+	- Added support for Libusb (/dev/bus/usb)
+        - New command line options (see --help)
+        - The usbfs is marked as deprecated in the kernel, so the default setup uses
+          Libusb. If usbfs is desired, then use the option '--with-usbfs' when running
+          configure (see --help for another options)
+

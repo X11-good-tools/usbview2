@@ -37,7 +37,7 @@ enum get_device_enum {
 
 
 void initialize_stuff (const gchar *devfile);
-int LoadUSBTree (int refresh, gchar *devfile);
+int LoadUSBTree(int refresh, gchar *devfile);
 
 
 void PopulateListBox (int deviceId);

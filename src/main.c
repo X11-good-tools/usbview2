@@ -29,18 +29,20 @@
 #endif
 
 #include <gtk/gtk.h>
+#include <usb.h>
 
 #include "interface.h"
 #include "support.h"
 #include "usbtree.h"
 
-
 extern int read_input_options(int argc, char *argv[]);
 
-int
-main (int argc, char *argv[])
+int main (int argc, char *argv[])
 {
   GtkWidget *Main;
+
+  /* Init the USB stuff */
+  usb_init();
   
 #ifdef ENABLE_NLS
   bindtextdomain (GETTEXT_PACKAGE, PACKAGE_LOCALE_DIR);

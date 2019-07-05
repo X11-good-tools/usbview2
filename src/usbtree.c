@@ -193,7 +193,28 @@ void PopulateListBox (int deviceId)
     else
       output = g_strdup_printf("\nSerial Number: %s", device->serialNumber);
   }
-    
+
+  if (device->busNumber) {
+    if(output) {
+      tout = output;
+      output = g_strdup_printf("%s\nBus Number: %i", tout, device->busNumber);
+      g_free(tout);
+    }
+    else
+      output = g_strdup_printf("\nBus Number: %i", device->busNumber);
+  }
+  
+  /* Add the device address */
+  if (device->busAddress) {
+    if(output) {
+      tout = output;
+      output = g_strdup_printf("%s\nBus Address: %i", tout, device->busAddress);
+      g_free(tout);
+    }
+    else
+      output = g_strdup_printf("\nBus Address: %i", device->busAddress);
+  }
+  
   /* add speed */
   switch (device->speed) {
   case 1 :        tempString = "1.5Mb/s (low)";   break;

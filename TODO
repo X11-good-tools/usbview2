@@ -2,12 +2,14 @@
 @TODO - Usbview2
 ----------------
 
-- usbtree.c: Create an unique function for PopulateDevConfig, PopulateDevInterfaces,
-  PopuplateDevPoints.
-- Clean the source code (callbacks.c)
 - The menu bar is incomplete (only the exit and about options are working)
+- configure.in: 
+    - Check for basename() and the corresponding header file
+- The device speed is displayed incorrectly (Unknown). The detection needs 
+  root permissions (ioctl() operation with '+w'). We can probably
+  try to get this info from the sysfs, but it's just a workaround and a
+  little complicated.
 
-
-
-Luis Galdos, 2007
+Luis Galdos, 2010
 <felipito@gmx.net>
+

@@ -102,7 +102,7 @@ static void DestroyInterface (DeviceInterface *interface)
 	if (interface == NULL)
 		return;
 
-	for (i = 0; i < MAX_ENDPOINTS; ++i)
+	for (i = 0; i < MAX_ENDPOINTS && i < interface->numEndpoints; ++i)
 		DestroyEndpoint (interface->endpoint[i]);
 
 	g_free (interface->name);
@@ -121,7 +121,7 @@ static void DestroyConfig (DeviceConfig *config)
 	if (config == NULL)
 		return;
 
-	for (i = 0; i < MAX_INTERFACES; ++i)
+	for (i = 0; i < MAX_INTERFACES && i < config->numInterfaces; ++i)
 		DestroyInterface (config->interface[i]);
 
 	g_free (config->maxPower);
@@ -146,10 +146,10 @@ static void DestroyDevice (Device *device)
 	if (device == NULL)
 		return;
 
-	for (i = 0; i < MAX_CHILDREN; ++i)
+	for (i = 0; i < MAX_CHILDREN && i < device->maxChildren; ++i)
 		DestroyDevice (device->child[i]);
 
-	for (i = 0; i < MAX_CONFIGS; ++i)
+	for (i = 0; i < MAX_CONFIGS && i < device->numConfigs; ++i)
 		DestroyConfig (device->config[i]);
 
 	if (device->bandwidth != NULL) {
@@ -164,8 +164,11 @@ static void DestroyDevice (Device *device)
 	g_free (device->protocol);
 	g_free (device->revisionNumber);
 	g_free (device->manufacturer);
-	g_free (device->product);
-	g_free (device->serialNumber);
+	/* @lgaldos: lsusb itsn't  providing some infos, so skip it */
+	if (device->product)
+		g_free (device->product);
+	if (device->serialNumber)
+		g_free (device->serialNumber);
 
 	g_free (device);
 
@@ -243,8 +246,8 @@ static Device *AddDevice (char *line)
 		device->parent = usb_find_device (device->parentNumber, device->busNumber);
 		if (device->parent == NULL) {
 			printf ("can't find parent...not good.\n");
-		}
-		device->parent->child[device->portNumber] = device;
+		} else
+			device->parent->child[device->portNumber] = device;
 	}
 
 	return(device);
